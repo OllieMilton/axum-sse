@@ -1,0 +1,1 @@
+// Static route handlers - currently unused

@@ -1,0 +1,206 @@
+openapi: 3.0.3
+info:
+  title: Server Status API
+  description: API endpoints for real-time server metrics monitoring
+  version: 1.0.0
+  
+servers:
+  - url: http://localhost:3000
+    description: Development server
+
+paths:
+  /api/server-status:
+    get:
+      summary: Get current server status snapshot
+      description: Returns current server metrics including memory, CPU, uptime, and network statistics
+      operationId: getServerStatus
+      responses:
+        '200':
+          description: Server status retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusPageData'
+        '500':
+          description: Internal server error - metrics collection failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+                
+  /api/server-status-stream:
+    get:
+      summary: Server-Sent Events stream for real-time status updates
+      description: SSE endpoint providing server metrics updates every 5 seconds
+      operationId: getServerStatusStream
+      responses:
+        '200':
+          description: SSE stream established
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: SSE stream with status-update events containing JSON StatusPageData
+              examples:
+                status_update:
+                  summary: Status update event
+                  value: |
+                    event: status-update
+                    data: {"server_metrics": {...}, "collection_interval_seconds": 5, "server_info": {...}}
+                    
+        '500':
+          description: Failed to establish SSE stream
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    StatusPageData:
+      type: object
+      required: [server_metrics, collection_interval_seconds, server_info]
+      properties:
+        server_metrics:
+          $ref: '#/components/schemas/ServerMetrics'
+        collection_interval_seconds:
+          type: integer
+          minimum: 1
+          example: 5
+          description: How often metrics are updated (seconds)
+        server_info:
+          $ref: '#/components/schemas/ServerInfo'
+          
+    ServerMetrics:
+      type: object
+      required: [timestamp, memory_usage, cpu_usage, uptime, network_metrics]
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          description: When metrics were collected (ISO 8601)
+        memory_usage:
+          $ref: '#/components/schemas/MemoryMetrics'
+        cpu_usage:
+          $ref: '#/components/schemas/CpuMetrics'
+        uptime:
+          type: integer
+          minimum: 0
+          description: System uptime in seconds
+        network_metrics:
+          $ref: '#/components/schemas/NetworkMetrics'
+          
+    MemoryMetrics:
+      type: object
+      required: [total_bytes, used_bytes, available_bytes, usage_percentage]
+      properties:
+        total_bytes:
+          type: integer
+          minimum: 0
+          description: Total system memory in bytes
+        used_bytes:
+          type: integer
+          minimum: 0
+          description: Currently used memory in bytes
+        available_bytes:
+          type: integer
+          minimum: 0
+          description: Available memory in bytes
+        usage_percentage:
+          type: number
+          minimum: 0
+          maximum: 100
+          description: Memory usage as percentage
+          
+    CpuMetrics:
+      type: object
+      required: [usage_percentage, core_count, load_average]
+      properties:
+        usage_percentage:
+          type: number
+          minimum: 0
+          description: CPU usage percentage (can exceed 100% for multi-core)
+        core_count:
+          type: integer
+          minimum: 1
+          description: Number of CPU cores
+        load_average:
+          $ref: '#/components/schemas/LoadAverage'
+          
+    LoadAverage:
+      type: object
+      required: [one_minute, five_minute, fifteen_minute]
+      properties:
+        one_minute:
+          type: number
+          minimum: 0
+          description: 1-minute load average
+        five_minute:
+          type: number
+          minimum: 0
+          description: 5-minute load average
+        fifteen_minute:
+          type: number
+          minimum: 0
+          description: 15-minute load average
+          
+    NetworkMetrics:
+      type: object
+      required: [bytes_sent, bytes_received, packets_sent, packets_received, active_connections]
+      properties:
+        bytes_sent:
+          type: integer
+          minimum: 0
+          description: Total bytes transmitted
+        bytes_received:
+          type: integer
+          minimum: 0
+          description: Total bytes received
+        packets_sent:
+          type: integer
+          minimum: 0
+          description: Total packets transmitted
+        packets_received:
+          type: integer
+          minimum: 0
+          description: Total packets received
+        active_connections:
+          type: integer
+          minimum: 0
+          description: Current active network connections
+          
+    ServerInfo:
+      type: object
+      required: [hostname, version, start_time, environment]
+      properties:
+        hostname:
+          type: string
+          description: Server hostname
+          example: "axum-sse-server"
+        version:
+          type: string
+          pattern: '^[0-9]+\.[0-9]+\.[0-9]+.*$'
+          description: Application version (semantic versioning)
+          example: "1.0.0"
+        start_time:
+          type: string
+          format: date-time
+          description: When server started (ISO 8601)
+        environment:
+          type: string
+          enum: [development, staging, production]
+          description: Deployment environment
+          
+    ErrorResponse:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+          description: Error type identifier
+        message:
+          type: string
+          description: Human-readable error message
+        details:
+          type: object
+          description: Additional error context (optional)

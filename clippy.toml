@@ -1,3 +1,8 @@
 unnecessary_wraps = "allow"
 redundant_field_names = "allow"
 module_name_repetitions = "allow"
+
+# Metrics module specific rules
+cast_possible_truncation = "allow"  # For metrics conversion (f32/f64 to integers)
+cast_precision_loss = "allow"       # For percentage calculations
+doc_markdown = "warn"               # Ensure proper documentation for metrics structs
