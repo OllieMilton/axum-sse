@@ -1,0 +1,162 @@
+openapi: 3.0.0
+info:
+  title: SSE Time Broadcasting API
+  description: Experimental application for Server-Sent Events time broadcasting
+  version: 1.0.0
+  contact:
+    name: SSE Time Broadcasting
+    
+servers:
+  - url: http://localhost:3000
+    description: Development server
+
+paths:
+  /:
+    get:
+      summary: Serve main application page
+      description: Returns the main SPA page with time display interface
+      responses:
+        '200':
+          description: HTML page with embedded SvelteKit application
+          content:
+            text/html:
+              schema:
+                type: string
+                description: Complete HTML page with embedded assets
+                
+  /about:
+    get:
+      summary: Serve about page
+      description: Returns the about page with application information
+      responses:
+        '200':
+          description: HTML page with about content
+          content:
+            text/html:
+              schema:
+                type: string
+                description: About page HTML content
+                
+  /api/time/stream:
+    get:
+      summary: Server-Sent Events time stream
+      description: Establishes SSE connection and broadcasts time events every 10 seconds
+      parameters:
+        - name: Accept
+          in: header
+          required: true
+          schema:
+            type: string
+            enum: ["text/event-stream"]
+          description: Must be text/event-stream for SSE
+      responses:
+        '200':
+          description: SSE stream of time events
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: Server-sent events stream
+                example: |
+                  data: {"timestamp":"2025-09-20T14:30:00Z","formatted_time":"20/09/2025 14:30:00","event_id":12345}
+                  
+                  data: {"timestamp":"2025-09-20T14:30:10Z","formatted_time":"20/09/2025 14:30:10","event_id":12346}
+        '400':
+          description: Invalid request headers
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /health:
+    get:
+      summary: Health check endpoint
+      description: Returns server health status
+      responses:
+        '200':
+          description: Server is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: ["ok"]
+                  timestamp:
+                    type: string
+                    format: date-time
+                    description: Current server time
+                    
+components:
+  schemas:
+    TimeEvent:
+      type: object
+      required:
+        - timestamp
+        - formatted_time
+        - event_id
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          description: UTC timestamp in ISO 8601 format
+          example: "2025-09-20T14:30:00Z"
+        formatted_time:
+          type: string
+          pattern: '^\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}$'
+          description: Time formatted in UK format (DD/MM/YYYY HH:MM:SS)
+          example: "20/09/2025 14:30:00"
+        event_id:
+          type: integer
+          minimum: 1
+          description: Monotonically increasing event identifier
+          example: 12345
+          
+    Error:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+          description: Error type
+          enum: ["BadRequest", "InternalServerError"]
+        message:
+          type: string
+          description: Human-readable error message
+          example: "Invalid Accept header for SSE endpoint"
+        timestamp:
+          type: string
+          format: date-time
+          description: When the error occurred
+          
+  headers:
+    Cache-Control:
+      description: Cache control for static assets
+      schema:
+        type: string
+        example: "public, max-age=3600"
+        
+    Content-Security-Policy:
+      description: CSP header for security
+      schema:
+        type: string
+        example: "default-src 'self'; connect-src 'self'"
+
+security: []  # No authentication required per FR-008
+
+tags:
+  - name: Static Content
+    description: HTML pages and static assets
+  - name: SSE
+    description: Server-Sent Events streaming
+  - name: Health
+    description: System health monitoring
