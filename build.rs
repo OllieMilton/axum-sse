@@ -1,7 +1,6 @@
 // Build script for integrating SvelteKit frontend build
 use std::process::Command;
 use std::path::Path;
-use std::env;
 
 fn main() {
     println!("cargo:rerun-if-changed=frontend/src");
@@ -9,16 +8,8 @@ fn main() {
     println!("cargo:rerun-if-changed=frontend/svelte.config.js");
     println!("cargo:rerun-if-changed=frontend/vite.config.ts");
     
-    // Only build frontend in release mode or if explicitly requested
-    let should_build_frontend = env::var("CARGO_CFG_RELEASE").is_ok() 
-        || env::var("BUILD_FRONTEND").is_ok();
-    
-    if should_build_frontend {
-        build_frontend();
-    } else {
-        println!("cargo:warning=Skipping frontend build in debug mode. Set BUILD_FRONTEND=1 to force build.");
-        ensure_build_directory();
-    }
+    // Always build frontend
+    build_frontend();
 }
 
 fn build_frontend() {

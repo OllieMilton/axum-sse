@@ -36,6 +36,13 @@
 					Home
 				</a>
 				<a 
+					href="/status" 
+					class="nav-link" 
+					class:active={$page.url.pathname === '/status'}
+				>
+					Status
+				</a>
+				<a 
 					href="/about" 
 					class="nav-link" 
 					class:active={$page.url.pathname === '/about'}

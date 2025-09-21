@@ -20,8 +20,9 @@ mod services;
 mod routes;
 mod middleware;
 
-use services::{SseService, StaticService};
-use routes::{pages, api};
+use services::{SseService, StaticService, MetricsService, MetricsCache};
+use routes::{pages, api, server_status, server_status_stream};
+use models::ServerInfo;
 use middleware::{
     cors_layer, security_headers, cache_control,
     request_logging, error_handling, request_id_middleware
@@ -38,12 +39,54 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sse_service = Arc::new(SseService::new());
     let static_service = Arc::new(StaticService::new());
     
+    // Initialize metrics services
+    let metrics_service = Arc::new(MetricsService::new());
+    let metrics_cache = Arc::new(MetricsCache::new(Arc::clone(&metrics_service)));
+    
+    // Initialize metrics service
+    if let Err(e) = metrics_service.initialize().await {
+        warn!("Failed to initialize metrics service: {}", e);
+    } else {
+        info!("📊 Metrics service initialized");
+    }
+    
+    // Start metrics cache background refresh
+    if let Err(e) = metrics_cache.start_background_refresh().await {
+        warn!("Failed to start metrics cache background refresh: {}", e);
+    } else {
+        info!("🔄 Metrics cache background refresh started");
+    }
+    
+    // Create server info
+    let server_info = ServerInfo::new(
+        hostname::get()
+            .map(|h| h.to_string_lossy().to_string())
+            .unwrap_or_else(|_| "unknown".to_string()),
+        env!("CARGO_PKG_VERSION").to_string(),
+        chrono::Utc::now(),
+        std::env::var("ENVIRONMENT").unwrap_or_else(|_| "development".to_string()),
+    ).unwrap_or_else(|e| {
+        warn!("Failed to create server info: {}, using defaults", e);
+        ServerInfo {
+            hostname: "unknown".to_string(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            start_time: chrono::Utc::now(),
+            environment: "development".to_string(),
+        }
+    });
+    
     // Start the SSE time broadcaster
     SseService::start_time_broadcaster(&sse_service);
     info!("📡 SSE time broadcaster started");
     
     // Build the application router
-    let app = build_router(sse_service, static_service);
+    let app = build_router(
+        sse_service, 
+        static_service, 
+        metrics_cache, 
+        metrics_service, 
+        server_info
+    );
     
     // Configure server address
     let addr = get_server_address();
@@ -65,15 +108,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn build_router(
     sse_service: Arc<SseService>,
     static_service: Arc<StaticService>,
+    metrics_cache: Arc<MetricsCache>,
+    metrics_service: Arc<MetricsService>,
+    server_info: ServerInfo,
 ) -> Router {
     info!("🔧 Building application router...");
+    
+    // Create server status state
+    let server_status_state = server_status::ServerStatusState::new(
+        Arc::clone(&metrics_cache),
+        Arc::clone(&metrics_service),
+        server_info,
+    );
     
     // API routes
     let api_routes = Router::new()
         .route("/time-stream", get(api::time_stream))
         .route("/health", get(api::health_check))
         .route("/status", get(api::service_status))
-        .route("/broadcast", post(api::manual_time_broadcast));
+        .route("/broadcast", post(api::manual_time_broadcast))
+        // Merge server status routes
+        .merge(server_status::create_router().with_state(server_status_state.clone()))
+        // Merge SSE routes
+        .merge(server_status_stream::create_sse_router().with_state(server_status_state));
     
     // Page routes for SPA  
     let page_routes = Router::new()
@@ -176,18 +233,34 @@ async fn shutdown_signal() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{
-        body::Body,
-        http::{Request, StatusCode},
-    };
+    
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::{Request, StatusCode};
+    use axum::body::Body;
     use tower::ServiceExt;
+    
+    fn create_test_services() -> (Arc<SseService>, Arc<StaticService>, Arc<MetricsCache>, Arc<MetricsService>, ServerInfo) {
+        let sse_service = Arc::new(SseService::new());
+        let static_service = Arc::new(StaticService::new());
+        let metrics_service = Arc::new(MetricsService::new());
+        let metrics_cache = Arc::new(MetricsCache::new(Arc::clone(&metrics_service)));
+        let server_info = ServerInfo {
+            hostname: "test-server".to_string(),
+            version: "1.0.0".to_string(),
+            start_time: chrono::Utc::now(),
+            environment: "test".to_string(),
+        };
+        
+        (sse_service, static_service, metrics_cache, metrics_service, server_info)
+    }
     
     #[tokio::test]
     async fn test_router_creation() {
-        let sse_service = Arc::new(SseService::new());
-        let static_service = Arc::new(StaticService::new());
+        let (sse_service, static_service, metrics_cache, metrics_service, server_info) = create_test_services();
         
-        let app = build_router(sse_service, static_service);
+        let app = build_router(sse_service, static_service, metrics_cache, metrics_service, server_info);
         
         // Test that the router can handle requests
         let request = Request::builder()
@@ -201,10 +274,9 @@ mod tests {
     
     #[tokio::test]
     async fn test_api_routes() {
-        let sse_service = Arc::new(SseService::new());
-        let static_service = Arc::new(StaticService::new());
+        let (sse_service, static_service, metrics_cache, metrics_service, server_info) = create_test_services();
         
-        let app = build_router(sse_service, static_service);
+        let app = build_router(sse_service, static_service, metrics_cache, metrics_service, server_info);
         
         // Test health endpoint
         let request = Request::builder()
@@ -218,10 +290,9 @@ mod tests {
     
     #[tokio::test]
     async fn test_page_routes() {
-        let sse_service = Arc::new(SseService::new());
-        let static_service = Arc::new(StaticService::new());
+        let (sse_service, static_service, metrics_cache, metrics_service, server_info) = create_test_services();
         
-        let app = build_router(sse_service, static_service);
+        let app = build_router(sse_service, static_service, metrics_cache, metrics_service, server_info);
         
         // Test index page
         let request = Request::builder()
@@ -232,6 +303,7 @@ mod tests {
         let response = app.oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
     }
+}
     
     #[test]
     fn test_server_address_parsing() {
