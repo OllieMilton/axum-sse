@@ -1,8 +1,8 @@
 
-# Implementation Plan: Server Status Page
+# Implementation Plan: OS Information on Status Page
 
-**Branch**: `002-the-user-interface` | **Date**: 21 September 2025 | **Spec**: [spec.md](spec.md)
-**Input**: Feature specification from `/specs/002-the-user-interface/spec.md`
+**Branch**: `003-the-status-page` | **Date**: 22 September 2025 | **Spec**: [spec.md](/home/omilton/work/axum-sse/specs/003-the-status-page/spec.md)
+**Input**: Feature specification from `/specs/003-the-status-page/spec.md`
 
 ## Execution Flow (/plan command scope)
 ```
@@ -31,32 +31,29 @@
 - Phase 3-4: Implementation execution (manual or via tools)
 
 ## Summary
-Create a dedicated server status page accessible via navigation bar that displays real-time server metrics (memory usage, CPU usage, uptime, networking statistics) with graphical representations, updating every 5 seconds for competent computer users monitoring the application.
+Add operating system information display to the existing server status page. Users need OS context (name, version, architecture, kernel version) alongside existing metrics for better system understanding and troubleshooting. Technical approach: Extend existing metrics collection service with OS information gathering, add new UI section to status page, load OS data once on initialization since it doesn't change during runtime.
 
 ## Technical Context
-**Language/Version**: Rust 1.75+ (backend), TypeScript 5.0+ (frontend)  
-**Primary Dependencies**: Axum 0.7+, Tokio runtime, Tower middleware, SvelteKit, system monitoring crates  
-**Storage**: In-memory metrics collection (no persistent storage required)  
-**Testing**: cargo test (backend), vitest (frontend), integration tests for SSE endpoints  
-**Target Platform**: Linux server deployment with embedded SPA frontend  
-**Project Type**: web (existing Rust backend + SvelteKit frontend)  
-**Performance Goals**: Sub-millisecond API response, 5-second metric updates, 1000+ concurrent SSE connections  
-**Constraints**: <200ms response time, <50MB additional memory, real-time system monitoring  
-**Scale/Scope**: Single page addition, system metrics API, navigation integration
+**Language/Version**: Rust 1.75+ (edition 2021)  
+**Primary Dependencies**: Axum 0.7, Tokio, sysinfo 0.30, hostname 0.3, include_dir 0.7  
+**Storage**: N/A (in-memory system metrics)  
+**Testing**: cargo test, axum-test 14.0, tokio-test 0.4  
+**Target Platform**: Linux server (primary), cross-platform compatible  
+**Project Type**: web - Rust backend + SvelteKit frontend with embedded assets  
+**Performance Goals**: Sub-200ms response times, <50MB memory usage, 1000+ concurrent SSE clients  
+**Constraints**: Single binary deployment, embedded static assets, TDD mandatory, memory safety  
+**Scale/Scope**: Enhancement to existing status page, OS info collection via sysinfo crate
 
 ## Constitution Check
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-- **Memory Safety First**: ✅ Using Rust's ownership system, no unsafe code needed for metrics collection
-- **API-First Design**: ✅ Will define OpenAPI contracts for status endpoints before implementation
-- **Test-First Development**: ✅ TDD approach with unit tests for metrics collection, integration tests for endpoints
-- **Static Asset Embedding**: ✅ New frontend page will be embedded via existing build process
-- **Performance by Default**: ✅ Real-time metrics with <200ms response, async endpoints, minimal memory footprint
-- **Required Stack**: ✅ Using Rust 1.75+, Axum 0.7+, Tokio runtime, Tower middleware
-- **Frontend Integration**: ✅ Adding new SvelteKit page to existing embedded frontend
-- **Deployment**: ✅ Maintains single binary deployment model
-- **Monitoring**: ✅ Will use existing tracing infrastructure for new endpoints
-- **Security**: ✅ Will follow existing CORS configuration and input validation patterns
+**Memory Safety First**: ✅ Using sysinfo crate (safe Rust), no unsafe code required  
+**API-First Design**: ✅ Will extend existing /api/server-status endpoint pattern  
+**Test-First Development**: ✅ TDD mandatory - tests before implementation  
+**Static Asset Embedding**: ✅ Frontend changes embedded via existing build.rs process  
+**Performance by Default**: ✅ OS info loaded once (static data), no performance impact  
+
+**Constitutional Compliance**: PASS - No violations detected
 
 ## Project Structure
 
@@ -108,7 +105,7 @@ ios/ or android/
 └── [platform-specific structure]
 ```
 
-**Structure Decision**: Option 2 (Web application) - existing Rust backend + SvelteKit frontend
+**Structure Decision**: Option 2 (Web application) - Rust backend with SvelteKit frontend and embedded assets
 
 ## Phase 0: Outline & Research
 1. **Extract unknowns from Technical Context** above:
@@ -169,9 +166,6 @@ ios/ or android/
 **Task Generation Strategy**:
 - Load `.specify/templates/tasks-template.md` as base
 - Generate tasks from Phase 1 design docs (contracts, data model, quickstart)
-- Backend tasks: Data model implementation, metrics collection service, API endpoints
-- Frontend tasks: Status page component, Chart.js integration, navigation updates
-- Testing tasks: Contract tests, integration tests, SSE stream validation
 - Each contract → contract test task [P]
 - Each entity → model creation task [P] 
 - Each user story → integration test task
@@ -179,15 +173,10 @@ ios/ or android/
 
 **Ordering Strategy**:
 - TDD order: Tests before implementation 
-- Dependency order: Data models → Services → API endpoints → Frontend components
-- Backend before frontend: API must exist before frontend can consume
+- Dependency order: Models before services before UI
 - Mark [P] for parallel execution (independent files)
 
-**Estimated Output**: 
-- Backend: ~8-10 tasks (models, services, endpoints, tests)
-- Frontend: ~6-8 tasks (page, components, navigation, charts)
-- Integration: ~4-5 tasks (SSE tests, end-to-end validation)
-- Total: ~20-25 numbered, ordered tasks in tasks.md
+**Estimated Output**: 25-30 numbered, ordered tasks in tasks.md
 
 **IMPORTANT**: This phase is executed by the /tasks command, NOT by /plan
 
@@ -215,14 +204,14 @@ ios/ or android/
 - [x] Phase 1: Design complete (/plan command)
 - [x] Phase 2: Task planning complete (/plan command - describe approach only)
 - [x] Phase 3: Tasks generated (/tasks command)
-- [x] Phase 4: Implementation complete
-- [x] Phase 5: Validation passed
+- [ ] Phase 4: Implementation complete
+- [ ] Phase 5: Validation passed
 
 **Gate Status**:
 - [x] Initial Constitution Check: PASS
-- [x] Post-Design Constitution Check: PASS - Design maintains constitutional compliance
+- [x] Post-Design Constitution Check: PASS
 - [x] All NEEDS CLARIFICATION resolved
-- [x] Complexity deviations documented - No deviations needed
+- [x] Complexity deviations documented
 
 ---
 *Based on Constitution v2.1.1 - See `/memory/constitution.md`*

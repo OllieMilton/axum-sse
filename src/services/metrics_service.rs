@@ -3,7 +3,7 @@
 
 use crate::models::{
     MetricsCollectionError, MetricsResponse, ServerMetrics, MemoryMetrics, 
-    CpuMetrics, NetworkMetrics
+    CpuMetrics, NetworkMetrics, OsInfo
 };
 use crate::models::cpu_metrics::LoadAverage;
 use chrono::Utc;
@@ -14,6 +14,38 @@ use std::time::Instant;
 use sysinfo::{System, RefreshKind, CpuRefreshKind, MemoryRefreshKind};
 use tokio::sync::Mutex;
 use tracing::{debug, error, instrument};
+
+/// Normalize OS name to standard identifiers
+fn normalize_os_name(raw_name: &str, distribution: Option<&str>) -> String {
+    let name_lower = raw_name.to_lowercase();
+    
+    // Linux distributions
+    if name_lower.contains("ubuntu") || name_lower.contains("debian") || 
+       name_lower.contains("fedora") || name_lower.contains("centos") ||
+       name_lower.contains("rhel") || name_lower.contains("suse") ||
+       name_lower.contains("arch") || name_lower.contains("mint") ||
+       (distribution.is_some() && !name_lower.contains("windows") && !name_lower.contains("macos")) {
+        return "Linux".to_string();
+    }
+    
+    // Windows variants
+    if name_lower.contains("windows") {
+        return "Windows".to_string();
+    }
+    
+    // macOS variants
+    if name_lower.contains("macos") || name_lower.contains("darwin") || name_lower.contains("osx") {
+        return "macOS".to_string();
+    }
+    
+    // BSD variants
+    if name_lower.contains("freebsd") || name_lower.contains("openbsd") || name_lower.contains("netbsd") {
+        return "FreeBSD".to_string();
+    }
+    
+    // If we can't identify it, return the original name
+    raw_name.to_string()
+}
 
 /// Configuration for metrics collection service
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -182,6 +214,13 @@ impl MetricsService {
         }
 
         result
+    }
+
+    /// Collect OS information independently
+    #[instrument(skip(self))]
+    pub async fn collect_os_info(&self) -> Result<OsInfo, MetricsCollectionError> {
+        let system = self.system.lock().await;
+        self.collect_os_info_from_system(&system)
     }
 
     /// Perform the actual metrics collection
@@ -396,6 +435,69 @@ impl MetricsService {
         }
         
         count
+    }
+
+    /// Collect OS information from system
+    fn collect_os_info_from_system(&self, _system: &System) -> Result<OsInfo, MetricsCollectionError> {
+        // Get raw OS name using static methods
+        let raw_name = match System::name() {
+            Some(name) if !name.trim().is_empty() => name,
+            _ => return Err(MetricsCollectionError::system_unavailable("OS name not available")),
+        };
+
+        // Get distribution info (for Linux systems)
+        let distribution = match System::distribution_id() {
+            d if !d.trim().is_empty() => Some(d),
+            _ => None,
+        };
+
+        // Normalize OS name based on known patterns
+        let name = normalize_os_name(&raw_name, distribution.as_deref());
+
+        // Get OS version 
+        let version = match System::os_version() {
+            Some(version) if !version.trim().is_empty() => version,
+            _ => "Unknown".to_string(),
+        };
+
+        // Get architecture
+        let architecture = match System::cpu_arch() {
+            Some(arch) if !arch.trim().is_empty() => arch,
+            _ => "Unknown".to_string(),
+        };
+
+        // Get kernel version
+        let kernel_version = match System::kernel_version() {
+            Some(kernel) if !kernel.trim().is_empty() => kernel,
+            _ => "Unknown".to_string(),
+        };
+
+        // Create long description by combining available info
+        let long_description = if let Some(dist) = &distribution {
+            format!("{} {} {} ({})", name, dist, version, architecture)
+        } else {
+            format!("{} {} ({})", name, version, architecture)
+        };
+
+        // Create OsInfo using struct syntax and validate
+        let os_info = OsInfo {
+            name,
+            version,
+            architecture,
+            kernel_version,
+            distribution,
+            long_description,
+        };
+
+        // Validate the created OsInfo
+        match os_info.validate() {
+            Ok(()) => Ok(os_info),
+            Err(validation_error) => {
+                // If validation fails, create fallback OsInfo
+                tracing::warn!("OS info validation failed: {}, using fallback", validation_error);
+                Ok(OsInfo::fallback())
+            }
+        }
     }
 
     /// Get metrics from cache if available and fresh
@@ -635,5 +737,28 @@ mod tests {
         let _response2 = service.get_metrics().await;
         let stats = service.get_stats().await;
         assert_eq!(stats.cache_misses, 2);
+    }
+
+    #[tokio::test]
+    async fn test_os_info_collection() {
+        let service = MetricsService::new();
+        service.initialize().await.unwrap();
+
+        // Test OS info collection
+        let os_info_result = service.collect_os_info().await;
+        assert!(os_info_result.is_ok(), "OS info collection should succeed");
+
+        let os_info = os_info_result.unwrap();
+        
+        // OS info should have meaningful data (not fallback values)
+        assert!(!os_info.name.is_empty(), "OS name should not be empty");
+        assert!(os_info.name != "Unknown", "Should collect real OS name, not fallback");
+        assert!(!os_info.version.is_empty(), "OS version should not be empty");
+        assert!(!os_info.architecture.is_empty(), "OS architecture should not be empty");
+        assert!(!os_info.kernel_version.is_empty(), "Kernel version should not be empty");
+        assert!(!os_info.long_description.is_empty(), "Long description should not be empty");
+        
+        // Validate the collected OS info
+        assert!(os_info.validate().is_ok(), "Collected OS info should be valid");
     }
 }
