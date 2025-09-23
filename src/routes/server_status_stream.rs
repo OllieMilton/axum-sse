@@ -535,7 +535,7 @@ pub async fn get_sse_info(
     State(_state): State<ServerStatusState>,
 ) -> impl IntoResponse {
     let info = serde_json::json!({
-        "endpoint": "/api/server-status-stream",
+        "endpoint": "/server-status-stream",
         "description": "Server-Sent Events stream for real-time server metrics",
         "parameters": {
             "interval": "Update interval in seconds (1-60, default: 5)",
@@ -552,7 +552,7 @@ pub async fn get_sse_info(
             "Content-Type": "text/event-stream",
             "Connection": "keep-alive"
         },
-        "example_url": "/api/server-status-stream?interval=10&detailed=false&metrics=memory,cpu",
+        "example_url": "/server-status-stream?interval=10&detailed=false&metrics=memory,cpu",
         "api_version": "1.0"
     });
 
@@ -581,6 +581,7 @@ mod tests {
             "1.0.0".to_string(),
             chrono::Utc::now(),
             "development".to_string(),
+            crate::models::OsInfo::fallback(),
         ).expect("Failed to create test ServerInfo");
 
         ServerStatusState::new(metrics_cache, metrics_service, server_info)
@@ -592,11 +593,11 @@ mod tests {
         let app = create_sse_router().with_state(state);
         let server = TestServer::new(app).unwrap();
 
-        let response = server.get("/api/server-status-stream/info").await;
+        let response = server.get("/server-status-stream/info").await;
         assert_eq!(response.status_code(), 200);
 
         let body: serde_json::Value = response.json();
-        assert_eq!(body["endpoint"], "/api/server-status-stream");
+        assert_eq!(body["endpoint"], "/server-status-stream");
         assert_eq!(body["api_version"], "1.0");
         assert!(body["parameters"].is_object());
     }
@@ -743,6 +744,7 @@ mod tests {
                     "1.0.0".to_string(),
                     Utc::now(),
                     "development".to_string(),
+                    crate::models::OsInfo::fallback(),
                 ).expect("Failed to create test ServerInfo"),
             ).expect("Failed to create test StatusData"),
             sequence: 1,

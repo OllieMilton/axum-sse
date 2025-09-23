@@ -1,12 +1,5 @@
-use axum::{
-    Router,
-    Extension,
-    routing::{get, post},
-};
 use std::{sync::Arc, net::SocketAddr};
 use tokio::signal;
-use tower::ServiceBuilder;
-use tower_http::trace::TraceLayer;
 use tracing::{info, warn};
 use tracing_subscriber::{
     layer::SubscriberExt,
@@ -15,18 +8,7 @@ use tracing_subscriber::{
     EnvFilter,
 };
 
-mod models;
-mod services;
-mod routes;
-mod middleware;
-
-use services::{SseService, StaticService, MetricsService, MetricsCache};
-use routes::{pages, api, server_status, server_status_stream};
-use models::ServerInfo;
-use middleware::{
-    cors_layer, security_headers, cache_control,
-    request_logging, error_handling, request_id_middleware
-};
+use axum_sse::{build_router, SseService, StaticService, MetricsService, MetricsCache, ServerInfo, OsInfo};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -57,6 +39,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!("🔄 Metrics cache background refresh started");
     }
     
+    // Collect OS information
+    let os_info = metrics_service.collect_os_info().await.unwrap_or_else(|e| {
+        warn!("Failed to collect OS info: {}, using fallback", e);
+        OsInfo::fallback()
+    });
+    
     // Create server info
     let server_info = ServerInfo::new(
         hostname::get()
@@ -65,14 +53,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         env!("CARGO_PKG_VERSION").to_string(),
         chrono::Utc::now(),
         std::env::var("ENVIRONMENT").unwrap_or_else(|_| "development".to_string()),
+        os_info.clone(),
     ).unwrap_or_else(|e| {
         warn!("Failed to create server info: {}, using defaults", e);
-        ServerInfo {
-            hostname: "unknown".to_string(),
-            version: env!("CARGO_PKG_VERSION").to_string(),
-            start_time: chrono::Utc::now(),
-            environment: "development".to_string(),
-        }
+        ServerInfo::new(
+            "unknown".to_string(),
+            env!("CARGO_PKG_VERSION").to_string(),
+            chrono::Utc::now(),
+            "development".to_string(),
+            os_info,
+        ).unwrap()
     });
     
     // Start the SSE time broadcaster
@@ -103,69 +93,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     info!("👋 Server shutdown complete");
     Ok(())
-}
-
-fn build_router(
-    sse_service: Arc<SseService>,
-    static_service: Arc<StaticService>,
-    metrics_cache: Arc<MetricsCache>,
-    metrics_service: Arc<MetricsService>,
-    server_info: ServerInfo,
-) -> Router {
-    info!("🔧 Building application router...");
-    
-    // Create server status state
-    let server_status_state = server_status::ServerStatusState::new(
-        Arc::clone(&metrics_cache),
-        Arc::clone(&metrics_service),
-        server_info,
-    );
-    
-    // API routes
-    let api_routes = Router::new()
-        .route("/time-stream", get(api::time_stream))
-        .route("/health", get(api::health_check))
-        .route("/status", get(api::service_status))
-        .route("/broadcast", post(api::manual_time_broadcast))
-        // Merge server status routes
-        .merge(server_status::create_router().with_state(server_status_state.clone()))
-        // Merge SSE routes
-        .merge(server_status_stream::create_sse_router().with_state(server_status_state));
-    
-    // Page routes for SPA  
-    let page_routes = Router::new()
-        .route("/", get(pages::serve_main_page))
-        // Static assets (CSS, JS, images) - must be before the SPA fallback
-        .route("/assets/*path", get(pages::serve_static_asset))
-        .route("/_app/*path", get(pages::serve_app_asset))
-        .route("/favicon.ico", get(pages::serve_fallback_asset))
-        // SPA fallback - catches all other routes and serves index.html for client-side routing
-        .fallback(get(pages::serve_spa_fallback));
-    
-    // Build main application
-    Router::new()
-        // Mount API routes under /api prefix
-        .nest("/api", api_routes)
-        // Mount page routes at root
-        .merge(page_routes)
-        // Add service extensions
-        .layer(Extension(sse_service))
-        .layer(Extension(static_service))
-        // Add middleware stack (order matters - first added runs last)
-        .layer(
-            ServiceBuilder::new()
-                // Request ID and logging first
-                .layer(axum::middleware::from_fn(request_id_middleware))
-                .layer(axum::middleware::from_fn(request_logging))
-                // Error handling
-                .layer(axum::middleware::from_fn(error_handling))
-                // Security layers
-                .layer(cors_layer())
-                .layer(axum::middleware::from_fn(security_headers))
-                .layer(axum::middleware::from_fn(cache_control))
-                // Tracing for detailed request/response logging
-                .layer(TraceLayer::new_for_http())
-        )
 }
 
 fn init_logging() {
@@ -233,10 +160,6 @@ async fn shutdown_signal() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
-#[cfg(test)]
-mod tests {
-    use super::*;
     use axum::http::{Request, StatusCode};
     use axum::body::Body;
     use tower::ServiceExt;
@@ -246,12 +169,13 @@ mod tests {
         let static_service = Arc::new(StaticService::new());
         let metrics_service = Arc::new(MetricsService::new());
         let metrics_cache = Arc::new(MetricsCache::new(Arc::clone(&metrics_service)));
-        let server_info = ServerInfo {
-            hostname: "test-server".to_string(),
-            version: "1.0.0".to_string(),
-            start_time: chrono::Utc::now(),
-            environment: "test".to_string(),
-        };
+        let server_info = ServerInfo::new(
+            "test-server".to_string(),
+            "1.0.0".to_string(),
+            chrono::Utc::now(),
+            "development".to_string(),
+            OsInfo::fallback(),
+        ).unwrap();
         
         (sse_service, static_service, metrics_cache, metrics_service, server_info)
     }
@@ -303,7 +227,6 @@ mod tests {
         let response = app.oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
     }
-}
     
     #[test]
     fn test_server_address_parsing() {

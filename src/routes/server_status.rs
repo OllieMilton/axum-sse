@@ -5,6 +5,8 @@ use crate::models::{
     StatusData, ServerMetrics, MetricsCollectionError, MetricsResponse,
     ServerInfo, MetricsValidationError
 };
+#[cfg(test)]
+use crate::models::OsInfo;
 use crate::services::{MetricsCache, MetricsService};
 use axum::{
     extract::{Query, State},
@@ -32,6 +34,8 @@ pub struct StatusQuery {
 /// Response format for server status endpoint
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ServerStatusResponse {
+    /// Indicates if the request was successful
+    pub success: bool,
     /// Status data with metrics and server info
     pub data: StatusData,
     /// Additional metadata about the response
@@ -203,6 +207,7 @@ pub async fn get_server_status(
     };
 
     let response = ServerStatusResponse {
+        success: true,
         data: status_data,
         metadata,
     };
@@ -397,6 +402,7 @@ mod tests {
             "1.0.0".to_string(),
             Utc::now(),
             "development".to_string(),
+            OsInfo::fallback(),
         ).expect("Failed to create test ServerInfo");
 
         ServerStatusState::new(metrics_cache, metrics_service, server_info)
@@ -410,7 +416,7 @@ mod tests {
         let app = create_router().with_state(state);
         let server = TestServer::new(app).unwrap();
 
-        let response = server.get("/api/server-status").await;
+        let response = server.get("/server-status").await;
         
         // Should succeed or return partial data
         assert!(
@@ -426,6 +432,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_server_status_includes_os_info() {
+        let state = create_test_state();
+        state.metrics_service.initialize().await.unwrap();
+        
+        let app = create_router().with_state(state);
+        let server = TestServer::new(app).unwrap();
+
+        let response = server.get("/server-status").await;
+        
+        if response.status_code() == StatusCode::OK {
+            let body: ServerStatusResponse = response.json();
+            
+            // Verify OS information is included in the response
+            let os_info = &body.data.server_info.os_info;
+            
+            assert!(!os_info.name.is_empty(), "OS name should be present in API response");
+            assert!(!os_info.version.is_empty(), "OS version should be present in API response");
+            assert!(!os_info.architecture.is_empty(), "OS architecture should be present in API response");
+            assert!(!os_info.kernel_version.is_empty(), "Kernel version should be present in API response");
+            assert!(!os_info.long_description.is_empty(), "OS description should be present in API response");
+            
+            // Verify it's real data, not fallback (unless collection actually failed)
+            if os_info.name != "Unknown" {
+                // If we collected real OS data, verify it looks reasonable
+                assert!(os_info.name.len() > 1, "OS name should be meaningful");
+                assert!(os_info.long_description.contains(&os_info.name), "Description should contain OS name");
+            }
+            
+            // Verify that os_info validates correctly
+            assert!(os_info.validate().is_ok(), "OS info in API response should be valid");
+        }
+    }
+
+    #[tokio::test]
     async fn test_health_endpoint() {
         let state = create_test_state();
         state.metrics_service.initialize().await.unwrap();
@@ -433,7 +473,7 @@ mod tests {
         let app = create_router().with_state(state);
         let server = TestServer::new(app).unwrap();
 
-        let response = server.get("/api/server-status/health").await;
+        let response = server.get("/server-status/health").await;
         assert_eq!(response.status_code(), StatusCode::OK);
 
         let body: serde_json::Value = response.json();
@@ -451,7 +491,7 @@ mod tests {
         let server = TestServer::new(app).unwrap();
 
         // Test detailed=false
-        let response = server.get("/api/server-status?detailed=false").await;
+        let response = server.get("/server-status?detailed=false").await;
         
         if response.status_code() == StatusCode::OK {
             let body: ServerStatusResponse = response.json();
@@ -468,7 +508,7 @@ mod tests {
         let app = create_router().with_state(state);
         let server = TestServer::new(app).unwrap();
 
-        let response = server.get("/api/server-status?force_refresh=true").await;
+        let response = server.get("/server-status?force_refresh=true").await;
         
         if response.status_code() == StatusCode::OK {
             let body: ServerStatusResponse = response.json();

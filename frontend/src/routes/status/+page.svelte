@@ -35,11 +35,20 @@
 		};
 	}
 	
+	interface OsInfo {
+		name: string;
+		version: string;
+		architecture: string;
+		kernel_version: string;
+		long_description: string;
+	}
+	
 	interface ServerInfo {
 		hostname: string;
 		version: string;
 		start_time: string;
 		environment: string;
+		os_info: OsInfo;
 	}
 	
 	interface StatusData {
@@ -438,6 +447,22 @@
 				<div class="info-item">
 					<span class="label">Uptime:</span>
 					<span class="value">{formatUptime(statusData.server_metrics.uptime)}</span>
+				</div>
+				<div class="info-item">
+					<span class="label">Operating System:</span>
+					<span class="value">{statusData.server_info.os_info.name}</span>
+				</div>
+				<div class="info-item">
+					<span class="label">OS Version:</span>
+					<span class="value">{statusData.server_info.os_info.version}</span>
+				</div>
+				<div class="info-item">
+					<span class="label">Architecture:</span>
+					<span class="value">{statusData.server_info.os_info.architecture}</span>
+				</div>
+				<div class="info-item">
+					<span class="label">Kernel:</span>
+					<span class="value">{statusData.server_info.os_info.kernel_version}</span>
 				</div>
 			</div>
 		</div>

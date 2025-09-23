@@ -4,7 +4,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use super::ServerMetrics;
+use super::{ServerMetrics, OsInfoValidationError, OsInfo};
 
 /// Complete data structure for API consumption
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,6 +28,8 @@ pub struct ServerInfo {
     pub start_time: DateTime<Utc>,
     /// Deployment environment (dev/staging/prod)
     pub environment: String,
+    /// Operating system information
+    pub os_info: OsInfo,
 }
 
 /// Validation errors for status data
@@ -43,11 +45,49 @@ pub enum StatusValidationError {
     InvalidStartTime { start_time: DateTime<Utc> },
     #[error("Invalid environment: {environment} (must be development, staging, or production)")]
     InvalidEnvironment { environment: String },
+    #[error("Invalid OS name: {name} (must be non-empty)")]
+    InvalidOsName { name: String },
+    #[error("Invalid OS version: {version} (must be non-empty)")]
+    InvalidOsVersion { version: String },
+    #[error("Invalid OS architecture: {architecture} (must be non-empty)")]
+    InvalidOsArchitecture { architecture: String },
+    #[error("Invalid kernel version: {kernel_version} (must be non-empty)")]
+    InvalidKernelVersion { kernel_version: String },
+    #[error("Invalid OS distribution: {distribution} (must be non-empty if present)")]
+    InvalidOsDistribution { distribution: String },
+    #[error("Invalid OS description: {description} (must be non-empty)")]
+    InvalidOsDescription { description: String },
     #[error("Server metrics validation failed: {source}")]
     ServerMetricsError {
         #[from]
         source: super::MetricsValidationError,
     },
+}
+
+/// Convert OS info validation errors to status validation errors
+impl From<OsInfoValidationError> for StatusValidationError {
+    fn from(error: OsInfoValidationError) -> Self {
+        match error {
+            OsInfoValidationError::InvalidName { name } => {
+                StatusValidationError::InvalidOsName { name }
+            }
+            OsInfoValidationError::InvalidVersion { version } => {
+                StatusValidationError::InvalidOsVersion { version }
+            }
+            OsInfoValidationError::InvalidArchitecture { architecture } => {
+                StatusValidationError::InvalidOsArchitecture { architecture }
+            }
+            OsInfoValidationError::InvalidKernelVersion { kernel_version } => {
+                StatusValidationError::InvalidKernelVersion { kernel_version }
+            }
+            OsInfoValidationError::InvalidDistribution { distribution } => {
+                StatusValidationError::InvalidOsDistribution { distribution }
+            }
+            OsInfoValidationError::InvalidLongDescription { description } => {
+                StatusValidationError::InvalidOsDescription { description }
+            }
+        }
+    }
 }
 
 #[allow(dead_code)]
@@ -152,12 +192,14 @@ impl ServerInfo {
         version: String,
         start_time: DateTime<Utc>,
         environment: String,
+        os_info: OsInfo,
     ) -> Result<Self, StatusValidationError> {
         let info = ServerInfo {
             hostname,
             version,
             start_time,
             environment,
+            os_info,
         };
 
         info.validate()?;
@@ -197,11 +239,16 @@ impl ServerInfo {
 
         // Validate environment
         match self.environment.as_str() {
-            "development" | "staging" | "production" => Ok(()),
-            _ => Err(StatusValidationError::InvalidEnvironment {
+            "development" | "staging" | "production" => {},
+            _ => return Err(StatusValidationError::InvalidEnvironment {
                 environment: self.environment.clone(),
             }),
         }
+
+        // Validate OS info
+        self.os_info.validate()?;
+
+        Ok(())
     }
 
     /// Basic semantic version validation
@@ -293,6 +340,7 @@ mod tests {
             "1.0.0".to_string(),
             Utc::now() - chrono::Duration::hours(1),
             "production".to_string(),
+            OsInfo::fallback(),
         ).unwrap();
 
         assert_eq!(info.hostname, "test-server");
@@ -307,6 +355,7 @@ mod tests {
             "1.0.0".to_string(),
             Utc::now() - chrono::Duration::hours(1),
             "production".to_string(),
+            OsInfo::fallback(),
         );
 
         assert!(result.is_err());
@@ -325,6 +374,7 @@ mod tests {
             "invalid-version".to_string(), // Invalid version
             Utc::now() - chrono::Duration::hours(1),
             "production".to_string(),
+            OsInfo::fallback(),
         );
 
         assert!(result.is_err());
@@ -337,6 +387,7 @@ mod tests {
             "1.0.0".to_string(),
             Utc::now() + chrono::Duration::hours(1), // Future time
             "production".to_string(),
+            OsInfo::fallback(),
         );
 
         assert!(result.is_err());
@@ -353,6 +404,7 @@ mod tests {
             "1.0.0".to_string(),
             Utc::now() - chrono::Duration::hours(1),
             "invalid-env".to_string(), // Invalid environment
+            OsInfo::fallback(),
         );
 
         assert!(result.is_err());
@@ -403,6 +455,7 @@ mod tests {
             "1.0.0".to_string(),
             Utc::now() - chrono::Duration::hours(1),
             "development".to_string(),
+            OsInfo::fallback(),
         ).unwrap();
         assert_eq!(dev_info.environment_color(), "#4CAF50");
 
@@ -411,6 +464,7 @@ mod tests {
             "1.0.0".to_string(),
             Utc::now() - chrono::Duration::hours(1),
             "production".to_string(),
+            OsInfo::fallback(),
         ).unwrap();
         assert_eq!(prod_info.environment_color(), "#F44336");
     }
@@ -467,6 +521,7 @@ mod tests {
             "1.0.0".to_string(),
             Utc::now() - chrono::Duration::hours(2),
             "development".to_string(),
+            OsInfo::fallback(),
         ).unwrap()
     }
 }

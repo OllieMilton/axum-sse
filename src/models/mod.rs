@@ -8,6 +8,7 @@ pub mod network_metrics;
 pub mod server_metrics;
 pub mod status_data;
 pub mod health_status;
+pub mod os_info;
 
 pub use time_event::TimeEvent;
 pub use cpu_metrics::CpuMetrics;
@@ -17,3 +18,4 @@ pub use network_metrics::NetworkMetrics;
 pub use server_metrics::{ServerMetrics, MetricsValidationError};
 pub use status_data::{StatusData, ServerInfo};
 pub use health_status::HealthStatus;
+pub use os_info::{OsInfo, OsInfoValidationError};
